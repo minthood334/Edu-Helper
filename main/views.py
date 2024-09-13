@@ -14,7 +14,7 @@ import base64
 import easyocr
 import prrocr
 
-API_KEY = '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'
+API_KEY = ''
 openai.api_key = API_KEY
 client = openai.OpenAI(api_key=API_KEY)
 thread = None
