@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학생 강좌 도우미</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'main/styles.css' %}">
+</head>
+<body>
+    <header>
+        <h1>학생 강좌 도우미</h1>
+        <input type="file" id="pdf-upload" accept="application/pdf">
+        <button id="upload-button" class="upload-button">생기부 업로드</button>
+    </header>
+    <div class="container">
+        <main>
+            <div id="chat-box" class="chat-box">
+                {% for entry in chat_history %}
+                    <div class="message user-message">
+                        <p>{{ entry.user|linebreaksbr }}</p>
+                    </div>
+                    <div class="message gpt-message">
+                        <p>{{ entry.gpt|linebreaksbr }}</p>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="input-container">
+                <input type="text" id="message-input" placeholder="무엇이 궁금하신가요?">
+                <button id="send-button" class="send-button">[ > ]</button>
+            </div>
+            <div class="reset-container">
+                <button id="reset-button" class="reset-button">채팅 내역 초기화</button>
+            </div>            
+        </main>
+    </div>
+    <div id="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <p>작업 중입니다. 잠시만 기다려주세요...</p>
+        </div>
+    </div>
+    <script>
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        const csrftoken = getCookie('csrftoken');
+        let originalPlaceholder = "";
+        let isSending = false;
+
+        // 메시지를 전송하는 함수
+        function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            if (originalPlaceholder == ""){
+                originalPlaceholder = messageInput.placeholder;
+            }  
+            if (messageInput) {  // 요소가 제대로 참조되었는지 확인
+                const message = messageInput.value.trim();
+                if (isSending) {
+                    messageInput.placeholder = '이미 전송중입니다...';
+                    return;
+                }
+                messageInput.value = '';
+                if (message) {  // 빈 메시지는 전송하지 않음
+                    isSending = true;
+                    messageInput.placeholder = '잠시 기다리세요...';
+                    const chatBox = document.getElementById('chat-box');
+                    const userMessageDiv = document.createElement('div');
+                    userMessageDiv.className = 'message user-message';
+                    userMessageDiv.innerHTML = `<p>${message}</p>`;
+                    chatBox.appendChild(userMessageDiv);
+
+                    const gptMessageDiv = document.createElement('div');
+                    gptMessageDiv.className = 'message gpt-message';
+                    gptMessageDiv.innerHTML = `<p>${"..."}</p>`;
+                    chatBox.appendChild(gptMessageDiv);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+
+                    fetch("{% url 'main' %}", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded",  // URLSearchParams를 보낼 때 사용
+                            "X-CSRFToken": csrftoken,  // CSRF 토큰을 헤더에 포함
+                        },
+                        body: new URLSearchParams({ message: message }),  // URLSearchParams로 데이터 전송
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // 화면에 대화 내역 추가
+                        gptMessageDiv.innerHTML = `<p>${data.gpt}</p>`;
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                        messageInput.placeholder = originalPlaceholder;
+                        isSending = false;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error)
+                        messageInput.placeholder = originalPlaceholder;
+                        isSending = false;
+                    });
+                } else {
+                    messageInput.placeholder = "제대로 된 메세지를 전송해주세요.";
+                }
+            } else {
+                console.error('messageInput 요소를 찾을 수 없습니다.');
+            }
+        }
+
+        function resetChat() {
+            fetch("{% url 'reset_chat' %}", {  // 'reset_chat' 뷰를 설정해야 합니다.
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrftoken,
+                },
+            })
+            .then(response => {
+                if (response.ok) {
+                    const chatBox = document.getElementById('chat-box');
+                    chatBox.innerHTML = '';  // 채팅 내역 초기화
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        function uploadRecord(){
+            const pdfFile = document.getElementById('pdf-upload').files[0];
+            if (pdfFile) {
+                document.getElementById("loading-overlay").style.display = "flex"
+                const formData = new FormData();
+                formData.append('pdf', pdfFile);
+
+                fetch("{% url 'upload_record' %}", {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrftoken,  // CSRF 토큰 추가
+                    },
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("loading-overlay").style.display = "none"
+                    if (data.status === 'success') {
+                        console.log('PDF 업로드 및 분석 완료');
+                    } else {
+                        console.error('오류 발생:', data.error);
+                    }
+                })
+                .catch(error => document.getElementById("loading-overlay").style.display = "none");
+            } else {
+                alert('PDF 파일을 선택하세요.');
+            }
+        }
+        
+        // 전송 버튼 클릭 이벤트
+        document.getElementById('send-button').addEventListener('click', function() {
+            sendMessage();
+        });
+
+        document.getElementById('upload-button').addEventListener('click', function() {
+            uploadRecord();
+        });
+
+        // Enter 키를 눌렀을 때 메시지 전송
+        document.getElementById('message-input').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();  // 기본 Enter 키 동작 방지 (폼 제출 방지)
+                sendMessage();
+            }
+        });
+
+        // 초기화 버튼 클릭 이벤트
+        document.getElementById('reset-button').addEventListener('click', function() {
+            resetChat();
+        });
+    </script>
+</body>
+</html>
